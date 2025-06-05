@@ -1,217 +1,441 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import * as ort from "onnxruntime-node";
 import sharp from "sharp";
 import fs from "fs";
 import path from "path";
+import { translateToFarsi } from "@/app/utils/translateToFarsi";
 
-// مسیر فایل لیبل‌ها
-const labelsPath = path.join(process.cwd(), "models", "coco_labels.json");
-let labels: string[] = [];
-try {
-  console.log("Reading labels from:", labelsPath);
-  labels = JSON.parse(fs.readFileSync(labelsPath, "utf-8"));
-  console.log("Loaded labels:", labels.slice(0, 5), "...", labels.slice(-5)); // چک کردن لیبل‌ها
-} catch (error) {
-  console.error("Error reading labels:", error);
+// COCO labels
+const COCO_LABELS = [
+  "person",
+  "bicycle",
+  "car",
+  "motorcycle",
+  "airplane",
+  "bus",
+  "train",
+  "truck",
+  "boat",
+  "traffic light",
+  "fire hydrant",
+  "stop sign",
+  "parking meter",
+  "bench",
+  "bird",
+  "cat",
+  "dog",
+  "horse",
+  "sheep",
+  "cow",
+  "elephant",
+  "bear",
+  "zebra",
+  "giraffe",
+  "backpack",
+  "umbrella",
+  "handbag",
+  "tie",
+  "suitcase",
+  "frisbee",
+  "skis",
+  "snowboard",
+  "sports ball",
+  "kite",
+  "baseball bat",
+  "baseball glove",
+  "skateboard",
+  "surfboard",
+  "tennis racket",
+  "bottle",
+  "wine glass",
+  "cup",
+  "fork",
+  "knife",
+  "spoon",
+  "bowl",
+  "banana",
+  "apple",
+  "sandwich",
+  "orange",
+  "broccoli",
+  "carrot",
+  "hot dog",
+  "pizza",
+  "donut",
+  "cake",
+  "chair",
+  "couch",
+  "potted plant",
+  "bed",
+  "dining table",
+  "toilet",
+  "tv",
+  "laptop",
+  "mouse",
+  "remote",
+  "keyboard",
+  "cell phone",
+  "microwave",
+  "oven",
+  "toaster",
+  "sink",
+  "refrigerator",
+  "book",
+  "clock",
+  "vase",
+  "scissors",
+  "teddy bear",
+  "hair drier",
+  "toothbrush",
+  "person",
+  "bicycle",
+  "car",
+  "motorcycle",
+  "airplane",
+  "bus",
+  "train",
+  "truck",
+  "boat",
+  "traffic light",
+  "fire hydrant",
+  "stop sign",
+  "parking meter",
+  "bench",
+  "bird",
+  "cat",
+  "dog",
+  "horse",
+  "sheep",
+  "cow",
+  "elephant",
+  "bear",
+  "zebra",
+  "giraffe",
+  "backpack",
+  "umbrella",
+  "handbag",
+  "tie",
+  "suitcase",
+  "frisbee",
+  "skis",
+  "snowboard",
+  "sports ball",
+  "kite",
+  "baseball bat",
+  "baseball glove",
+  "skateboard",
+  "surfboard",
+  "tennis racket",
+  "bottle",
+  "wine glass",
+  "cup",
+  "fork",
+  "knife",
+  "spoon",
+  "bowl",
+  "banana",
+  "apple",
+  "sandwich",
+  "orange",
+  "broccoli",
+  "carrot",
+  "hot dog",
+  "pizza",
+  "donut",
+  "cake",
+  "chair",
+  "couch",
+  "potted plant",
+  "bed",
+  "dining table",
+  "toilet",
+  "tv",
+  "laptop",
+  "mouse",
+  "remote",
+  "keyboard",
+  "cell phone",
+  "microwave",
+  "oven",
+  "toaster",
+  "sink",
+  "refrigerator",
+  "book",
+  "clock",
+  "vase",
+  "scissors",
+  "teddy bear",
+  "hair drier",
+  "toothbrush",
+];
+
+interface Detection {
+  label: string;
+  confidence: number;
+  box: number[];
 }
 
-// تابع نرمال‌سازی تصویر برای YOLOv5 (اصلاح‌شده)
-function preprocessImage(data: Buffer): Float32Array {
-  console.log("Raw image buffer length:", data.length); // دیباگ طول داده خام
-  if (data.length !== 640 * 640 * 3) {
-    console.error("Unexpected image buffer length:", data.length);
-    throw new Error("Unexpected image buffer length");
-  }
-
-  // نرمال‌سازی داده‌های خام به [0, 1]
+// Preprocess image for YOLOv5
+function preprocessImage(imageBuffer: Buffer): Float32Array {
   const pixels = new Float32Array(640 * 640 * 3);
-  for (let i = 0; i < data.length; i++) {
-    pixels[i] = data[i] / 255.0; // نرمال‌سازی به [0, 1]
-  }
-  console.log("Sample raw pixels:", pixels.slice(0, 15)); // دیباگ مقادیر خام پیکسل‌ها (15 تا برای دیدن RGB)
 
-  // تبدیل به فرمت NCHW (1, 3, 640, 640)
-  const nchw = new Float32Array(1 * 3 * 640 * 640);
-  for (let y = 0; y < 640; y++) {
-    for (let x = 0; x < 640; x++) {
-      const idx = (y * 640 + x) * 3;
-      const r = pixels[idx];
-      const g = pixels[idx + 1];
-      const b = pixels[idx + 2];
-      nchw[0 * 640 * 640 + y * 640 + x] = r; // R
-      nchw[1 * 640 * 640 + y * 640 + x] = g; // G
-      nchw[2 * 640 * 640 + y * 640 + x] = b; // B
+  // Normalize to [0, 1] and convert to NCHW format
+  for (let i = 0; i < imageBuffer.length; i += 3) {
+    const pixelIndex = Math.floor(i / 3);
+    const y = Math.floor(pixelIndex / 640);
+    const x = pixelIndex % 640;
+
+    // RGB to NCHW: [R_channel, G_channel, B_channel]
+    pixels[y * 640 + x] = imageBuffer[i] / 255.0; // R channel
+    pixels[640 * 640 + y * 640 + x] = imageBuffer[i + 1] / 255.0; // G channel
+    pixels[2 * 640 * 640 + y * 640 + x] = imageBuffer[i + 2] / 255.0; // B channel
+  }
+
+  return pixels;
+}
+
+// Convert Float16 (Uint16Array) to Float32Array
+function float16ToFloat32(float16Array: Uint16Array): Float32Array {
+  const float32Array = new Float32Array(float16Array.length);
+
+  for (let i = 0; i < float16Array.length; i++) {
+    const h = float16Array[i];
+
+    const sign = (h & 0x8000) >> 15;
+    const exponent = (h & 0x7c00) >> 10;
+    const mantissa = h & 0x03ff;
+
+    let value: number;
+
+    if (exponent === 0) {
+      if (mantissa === 0) {
+        // Zero
+        value = 0;
+      } else {
+        // Subnormal
+        value = Math.pow(-1, sign) * Math.pow(2, -14) * (mantissa / 1024);
+      }
+    } else if (exponent === 31) {
+      if (mantissa === 0) {
+        // Infinity
+        value = sign ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+      } else {
+        // NaN
+        value = Number.NaN;
+      }
+    } else {
+      // Normal
+      value =
+        Math.pow(-1, sign) * Math.pow(2, exponent - 15) * (1 + mantissa / 1024);
     }
-  }
-  console.log("Sample preprocessed data:", nchw.slice(0, 15)); // دیباگ داده خروجی
-  return nchw;
-}
 
-// تبدیل Float32Array به Float16Array
-function toFloat16Array(float32Array: Float32Array): Uint16Array {
-  const float16Array = new Uint16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    float16Array[i] = float32ToFloat16(float32Array[i]);
-  }
-  return float16Array;
-}
-
-// تابع کمکی برای تبدیل float32 به float16
-function float32ToFloat16(value: number): number {
-  const float = new Float32Array([value]);
-  const bytes = new Uint32Array(float.buffer);
-  const bits = bytes[0];
-
-  const sign = bits & 0x80000000;
-  let exponent = (bits & 0x7f800000) >> 23;
-  const mantissa = bits & 0x007fffff;
-
-  if (exponent === 0xff) {
-    exponent = 0x1f;
-  } else if (exponent === 0) {
-    exponent = 0;
-  } else {
-    exponent = exponent - 127 + 15;
-    if (exponent > 0x1f) exponent = 0x1f;
-    else if (exponent <= 0) exponent = 0;
+    float32Array[i] = value;
   }
 
-  const mantissa16 = mantissa >> 13;
-  return (sign >> 16) | (exponent << 10) | mantissa16;
+  return float32Array;
 }
 
-// تابع پردازش خروجی YOLOv5
+// Sigmoid function
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
+
+// Process YOLOv5 output - corrected version
 function processYoloOutput(
   output: Float32Array,
-  imgWidth: number,
-  imgHeight: number,
-  confThreshold = 0.5,
-  iouThreshold = 0.4
-) {
-  const detections: Array<{
-    label: string;
-    confidence: number;
-    box: number[];
-  }> = [];
-  const strides = [8, 16, 32]; // مقیاس‌های YOLOv5
-  const anchors = [
-    [10, 13, 16, 30, 33, 23], // برای stride 8
-    [30, 61, 62, 45, 59, 119], // برای stride 16
-    [116, 90, 156, 198, 373, 326], // برای stride 32
-  ];
-  const numAnchors = 3; // هر مقیاس 3 anchor داره
+  originalWidth: number,
+  originalHeight: number,
+  confThreshold = 0.25,
+  iouThreshold = 0.45
+): Detection[] {
+  console.log("Processing YOLO output...");
+  console.log("Output length:", output.length);
 
-  console.log("Output shape:", output.length, "Dims:", output.dims); // دیباگ شکل خروجی
-  console.log("Sample output data:", output.slice(0, 15)); // دیباگ مقادیر خام
+  // YOLOv5 output format: [1, 25200, 85]
+  // 25200 = number of detections
+  // 85 = 4 (bbox) + 1 (objectness) + 80 (classes)
+  const numDetections = output.length / 85;
+  console.log("Estimated number of detections:", numDetections);
 
-  let offset = 0;
-  for (let s = 0; s < strides.length; s++) {
-    const stride = strides[s];
-    const gridSize = (640 / stride) * (640 / stride);
-    const anchorGroup = anchors[s];
+  const detections: Detection[] = [];
 
-    for (let a = 0; a < numAnchors; a++) {
-      for (let i = 0; i < gridSize; i++) {
-        const idx = offset + (i * numAnchors + a) * (5 + 80); // 5: [x, y, w, h, conf], 80: classes
-        if (idx + 4 >= output.length) {
-          console.log(
-            "Index out of bounds at stride",
-            stride,
-            "anchor",
-            a,
-            "grid",
-            i
-          );
-          continue;
-        }
+  // Debug first few outputs to understand the format
+  console.log(
+    "First detection data (converted to float32):",
+    output.slice(0, 85)
+  );
 
-        const confidence = 1 / (1 + Math.exp(-output[idx + 4])); // sigmoid on confidence
-        if (confidence < confThreshold) continue;
+  for (let i = 0; i < numDetections; i++) {
+    const baseIdx = i * 85;
 
-        // پیدا کردن کلاس با بالاترین احتمال
-        let maxClassScore = -Infinity;
-        let maxClassIndex = 0;
-        for (let j = 0; j < 80; j++) {
-          const score = 1 / (1 + Math.exp(-output[idx + 5 + j])); // sigmoid on class scores
-          if (score > maxClassScore) {
-            maxClassScore = score;
-            maxClassIndex = j;
-          }
-        }
+    // Extract bbox coordinates (center_x, center_y, width, height)
+    const centerX = output[baseIdx];
+    const centerY = output[baseIdx + 1];
+    const width = output[baseIdx + 2];
+    const height = output[baseIdx + 3];
 
-        const finalConfidence = confidence * maxClassScore;
-        if (finalConfidence < confThreshold) continue;
+    // Extract objectness confidence and apply sigmoid
+    const objectness = sigmoid(output[baseIdx + 4]);
 
-        // محاسبه مختصات کادر
-        const x = (output[idx] * 2 - 0.5 + (i % (640 / stride))) * stride;
-        const y =
-          (output[idx + 1] * 2 - 0.5 + Math.floor(i / (640 / stride))) * stride;
-        const w = Math.exp(output[idx + 2]) * anchorGroup[a * 2];
-        const h = Math.exp(output[idx + 3]) * anchorGroup[a * 2 + 1];
-        const box = [
-          ((x - w / 2) / 640) * imgWidth,
-          ((y - h / 2) / 640) * imgHeight,
-          ((x + w / 2) / 640) * imgWidth,
-          ((y + h / 2) / 640) * imgHeight,
-        ];
+    if (objectness < confThreshold) {
+      continue;
+    }
 
-        // console.log(
-        //   `Detection (stride ${stride}, anchor ${a}, grid ${i}): Confidence: ${confidence.toFixed(
-        //     4
-        //   )}, Max class score: ${maxClassScore.toFixed(
-        //     4
-        //   )}, Class index: ${maxClassIndex}, Label: ${labels[maxClassIndex]}`
-        // );
+    // Find the class with highest probability
+    let maxClassProb = 0;
+    let maxClassIndex = 0;
 
-        detections.push({
-          label: labels[maxClassIndex] || "unknown",
-          confidence: finalConfidence,
-          box,
+    for (let j = 0; j < 80; j++) {
+      const classProb = sigmoid(output[baseIdx + 5 + j]);
+      if (classProb > maxClassProb) {
+        maxClassProb = classProb;
+        maxClassIndex = j;
+      }
+    }
+
+    // Calculate final confidence
+    const confidence = objectness * maxClassProb;
+
+    if (confidence < confThreshold) {
+      continue;
+    }
+
+    // Convert from center format to corner format and scale to original image size
+    const x1 = Math.max(0, ((centerX - width / 2) / 640) * originalWidth);
+    const y1 = Math.max(0, ((centerY - height / 2) / 640) * originalHeight);
+    const x2 = Math.min(
+      originalWidth,
+      ((centerX + width / 2) / 640) * originalWidth
+    );
+    const y2 = Math.min(
+      originalHeight,
+      ((centerY + height / 2) / 640) * originalHeight
+    );
+
+    // Only add if the box has reasonable dimensions
+    if (x2 > x1 && y2 > y1) {
+      detections.push({
+        label: COCO_LABELS[maxClassIndex] || "unknown",
+        confidence: confidence,
+        box: [x1, y1, x2, y2],
+      });
+
+      // Log first few detections for debugging
+      if (detections.length <= 5) {
+        console.log(`Detection ${detections.length}:`, {
+          label: COCO_LABELS[maxClassIndex],
+          confidence: confidence,
+          objectness: objectness,
+          maxClassProb: maxClassProb,
+          centerX,
+          centerY,
+          width,
+          height,
+          box: [x1, y1, x2, y2],
         });
       }
     }
-    offset += gridSize * numAnchors * (5 + 80);
   }
 
-  return applyNMS(detections, iouThreshold);
+  console.log(`Found ${detections.length} raw detections`);
+
+  // Apply Non-Maximum Suppression
+  const finalDetections = applyNMS(detections, iouThreshold);
+  console.log(`After NMS: ${finalDetections.length} detections`);
+
+  return finalDetections;
 }
 
-// تابع NMS (Non-Maximum Suppression)
-function applyNMS(
-  detections: Array<{ label: string; confidence: number; box: number[] }>,
-  iouThreshold: number
-) {
+// Non-Maximum Suppression
+function applyNMS(detections: Detection[], iouThreshold: number): Detection[] {
+  // Sort by confidence (highest first)
   const sorted = detections.sort((a, b) => b.confidence - a.confidence);
-  const selected: typeof detections = [];
+  const selected: Detection[] = [];
 
-  for (const det of sorted) {
+  for (const detection of sorted) {
     let keep = true;
-    for (const sel of selected) {
-      if (calculateIoU(det.box, sel.box) > iouThreshold) {
+
+    for (const selectedDetection of selected) {
+      if (calculateIoU(detection.box, selectedDetection.box) > iouThreshold) {
         keep = false;
         break;
       }
     }
-    if (keep) selected.push(det);
+
+    if (keep) {
+      selected.push(detection);
+    }
   }
 
   return selected;
 }
 
-// محاسبه IoU (Intersection over Union)
+// Calculate Intersection over Union
 function calculateIoU(box1: number[], box2: number[]): number {
-  const [x1_min, y1_min, x1_max, y1_max] = box1;
-  const [x2_min, y2_min, x2_max, y2_max] = box2;
+  const [x1_1, y1_1, x2_1, y2_1] = box1;
+  const [x1_2, y1_2, x2_2, y2_2] = box2;
 
-  const x_min = Math.max(x1_min, x2_min);
-  const y_min = Math.max(y1_min, y2_min);
-  const x_max = Math.min(x1_max, x2_max);
-  const y_max = Math.min(y1_max, y2_max);
+  // Calculate intersection area
+  const x1 = Math.max(x1_1, x1_2);
+  const y1 = Math.max(y1_1, y1_2);
+  const x2 = Math.min(x2_1, x2_2);
+  const y2 = Math.min(y2_1, y2_2);
 
-  const intersection = Math.max(0, x_max - x_min) * Math.max(0, y_max - y_min);
-  const area1 = (x1_max - x1_min) * (y1_max - y1_min);
-  const area2 = (x2_max - x2_min) * (y2_max - y2_min);
-  return intersection / (area1 + area2 - intersection);
+  const intersectionArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+
+  // Calculate union area
+  const area1 = (x2_1 - x1_1) * (y2_1 - y1_1);
+  const area2 = (x2_2 - x1_2) * (y2_2 - y1_2);
+  const unionArea = area1 + area2 - intersectionArea;
+
+  return intersectionArea / unionArea;
+}
+
+// Persian translations
+
+// Convert Float32Array to Float16 for model input
+function float32ToFloat16(float32Array: Float32Array): Uint16Array {
+  const float16Array = new Uint16Array(float32Array.length);
+
+  for (let i = 0; i < float32Array.length; i++) {
+    const value = float32Array[i];
+
+    // Handle special cases
+    if (value === 0) {
+      float16Array[i] = 0;
+      continue;
+    }
+
+    if (!isFinite(value)) {
+      float16Array[i] = value > 0 ? 0x7c00 : 0xfc00; // +inf or -inf
+      continue;
+    }
+
+    // Convert to float16
+    const float32 = new Float32Array([value]);
+    const int32 = new Int32Array(float32.buffer)[0];
+
+    const sign = (int32 >>> 31) << 15;
+    let exponent = ((int32 >>> 23) & 0xff) - 127 + 15;
+    let mantissa = int32 & 0x7fffff;
+
+    if (exponent <= 0) {
+      // Subnormal or zero
+      mantissa = mantissa | 0x800000;
+      mantissa = mantissa >>> (1 - exponent);
+      exponent = 0;
+    } else if (exponent >= 31) {
+      // Infinity or NaN
+      exponent = 31;
+      mantissa = mantissa ? 0x200 : 0;
+    } else {
+      mantissa = mantissa >>> 13;
+    }
+
+    float16Array[i] = sign | (exponent << 10) | mantissa;
+  }
+
+  return float16Array;
 }
 
 export async function POST(req: NextRequest) {
@@ -223,146 +447,93 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "تصویر یافت نشد" }, { status: 404 });
     }
 
-    // خواندن ابعاد اصلی تصویر
-    const { width, height } = await sharp(imagePath).metadata();
-    console.log("Image dimensions:", width, "x", height); // دیباگ ابعاد تصویر
+    // Get original image dimensions
+    const metadata = await sharp(imagePath).metadata();
+    const originalWidth = metadata.width!;
+    const originalHeight = metadata.height!;
 
-    // پیش‌پردازش تصویر
+    console.log(
+      "Original image dimensions:",
+      originalWidth,
+      "x",
+      originalHeight
+    );
+
+    // Preprocess image
     const imageBuffer = await sharp(imagePath)
       .resize(640, 640)
-      .toColorspace("srgb") // مطمئن می‌شیم که فرمت RGB باشه
+      .removeAlpha() // Remove alpha channel if present
       .raw()
       .toBuffer();
-    console.log("Image buffer length after preprocessing:", imageBuffer.length); // دیباگ طول بافر
+
+    console.log("Preprocessed image buffer length:", imageBuffer.length);
 
     const preprocessedData = preprocessImage(imageBuffer);
+    const float16Data = float32ToFloat16(preprocessedData);
 
-    // تبدیل به float16
-    const float16Data = toFloat16Array(preprocessedData);
-
-    // ایجاد تنسور با نوع float16
+    // Create input tensor with float16
     const inputTensor = new ort.Tensor(
       "float16",
       float16Data,
       [1, 3, 640, 640]
     );
 
-    // بارگذاری مدل
+    // Load and run model
     const modelPath = path.join(process.cwd(), "models", "yolov5l.onnx");
     if (!fs.existsSync(modelPath)) {
       return NextResponse.json({ error: "مدل یافت نشد" }, { status: 404 });
     }
-    const session = await ort.InferenceSession.create(modelPath);
 
-    // اجرای مدل
+    console.log("Loading model...");
+    const session = await ort.InferenceSession.create(modelPath);
+    console.log("Model input names:", session.inputNames);
+    console.log("Model output names:", session.outputNames);
+
+    // Run inference
     const feeds: Record<string, ort.Tensor> = {
       [session.inputNames[0]]: inputTensor,
     };
+
+    console.log("Running inference...");
     const results = await session.run(feeds);
-    console.log("Model output names:", session.outputNames); // دیباگ نام خروجی‌ها
-    const output = results[session.outputNames[0]]; // فرض می‌کنیم فقط یک خروجی اصلی داره
-    const data = output.data as Float32Array;
+    const output = results[session.outputNames[0]];
 
-    // پردازش خروجی
-    const detections = processYoloOutput(data, width!, height!);
+    console.log("Model output shape:", output.dims);
+    console.log("Output data type:", typeof output.data);
+    console.log("Output data constructor:", output.data.constructor.name);
 
-    // ترجمه لیبل‌ها
+    // Convert output data to Float32Array if it's Uint16Array (float16)
+    let outputData: Float32Array;
+    if (output.data instanceof Uint16Array) {
+      console.log("Converting float16 output to float32...");
+      outputData = float16ToFloat32(output.data);
+    } else {
+      outputData = output.data as Float32Array;
+    }
+
+    console.log("Output data length:", outputData.length);
+
+    // Process detections with a higher confidence threshold to reduce false positives
+    const detections = processYoloOutput(
+      outputData,
+      originalWidth,
+      originalHeight,
+      0.25, // Higher confidence threshold
+      0.45 // IoU threshold
+    );
+
+    // Format results with proper confidence percentage
     const result = detections.map((det) => ({
       label: det.label,
       label_fa: translateToFarsi(det.label),
       confidence: `${(det.confidence * 100).toFixed(2)}%`,
-      box: det.box,
+      box: det.box.map((coord) => Math.round(coord)),
     }));
 
+    console.log("Final detections:", result.length);
     return NextResponse.json(result);
   } catch (error) {
     console.error("Error in image detection:", error);
     return NextResponse.json({ error: "خطای سرور" }, { status: 500 });
   }
-}
-
-function translateToFarsi(label: string): string {
-  const dictionary: Record<string, string> = {
-    person: "انسان",
-    bicycle: "دوچرخه",
-    car: "ماشین",
-    motorcycle: "موتورسیکلت",
-    airplane: "هواپیما",
-    bus: "اتوبوس",
-    train: "قطار",
-    truck: "کامیون",
-    boat: "قایق",
-    traffic_light: "چراغ راهنمایی",
-    fire_hydrant: "شیر آتش‌نشانی",
-    stop_sign: "تابلو توقف",
-    parking_meter: "پارکومتر",
-    bench: "نیمکت",
-    bird: "پرنده",
-    cat: "گربه",
-    dog: "سگ",
-    horse: "اسب",
-    sheep: "گوسفند",
-    cow: "گاو",
-    elephant: "فیل",
-    bear: "خرس",
-    zebra: "گورخر",
-    giraffe: "زرافه",
-    backpack: "کوله‌پشتی",
-    umbrella: "چتر",
-    handbag: "کیف دستی",
-    tie: "کراوات",
-    suitcase: "چمدان",
-    frisbee: "فریزبی",
-    skis: "اسکی",
-    snowboard: "اسنوبرد",
-    sports_ball: "توپ ورزشی",
-    kite: "بادبادک",
-    baseball_bat: "چوب بیسبال",
-    baseball_glove: "دستکش بیسبال",
-    skateboard: "اسکیت‌برد",
-    surfboard: "تخته موج‌سواری",
-    tennis_racket: "راکت تنیس",
-    bottle: "بطری",
-    wine_glass: "لیوان شراب",
-    cup: "فنجان",
-    fork: "چنگال",
-    knife: "چاقو",
-    spoon: "قاشق",
-    bowl: "کاسه",
-    banana: "موز",
-    apple: "سیب",
-    sandwich: "ساندویچ",
-    orange: "پرتقال",
-    broccoli: "بروکلی",
-    carrot: "هویج",
-    hot_dog: "هات‌داگ",
-    pizza: "پیتزا",
-    donut: "دونات",
-    cake: "کیک",
-    chair: "صندلی",
-    couch: "کاناپه",
-    potted_plant: "گیاه گلدانی",
-    bed: "تخت",
-    dining_table: "میز ناهارخوری",
-    toilet: "توالت",
-    tv: "تلویزیون",
-    laptop: "لپ‌تاپ",
-    mouse: "موس",
-    remote: "کنترل",
-    keyboard: "کیبورد",
-    cell_phone: "تلفن همراه",
-    microwave: "مایکروویو",
-    oven: "فر",
-    toaster: "توستر",
-    sink: "سینک",
-    refrigerator: "یخچال",
-    book: "کتاب",
-    clock: "ساعت",
-    vase: "گلدان",
-    scissors: "قیچی",
-    teddy_bear: "عروسک خرسی",
-    hair_drier: "سشوار",
-    toothbrush: "مسواک",
-  };
-  return dictionary[label.toLowerCase()] || "نامشخص";
 }

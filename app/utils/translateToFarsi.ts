@@ -80,6 +80,31 @@ export function translateToFarsi(label: string): string {
     teddy_bear: "عروسک خرسی",
     hair_drier: "سشوار",
     toothbrush: "مسواک",
+
+    "traffic light": "چراغ راهنمایی",
+    "fire hydrant": "شیر آتش‌نشانی",
+    "stop sign": "تابلو توقف",
+    "parking meter": "پارکومتر",
+
+    "sports ball": "توپ ورزشی",
+
+    "baseball bat": "چوب بیسبال",
+    "baseball glove": "دستکش بیسبال",
+
+    "tennis racket": "راکت تنیس",
+
+    "wine glass": "لیوان شراب",
+
+    "hot dog": "هات‌داگ",
+
+    "potted plant": "گیاه گلدانی",
+
+    "dining table": "میز ناهارخوری",
+
+    "cell phone": "تلفن همراه",
+
+    "teddy bear": "عروسک خرسی",
+    "hair drier": "سشوار",
   };
   return dictionary[label.toLowerCase()] || "نامشخص";
 }
