@@ -1,7 +1,7 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
-
+## for running you should download yolov5l.onnx or yolov5s.onnx and also imagenet_labels.json coco_labels.json and put it inside of the model in root also for one recognizing you should download mobilenetv2-10 too  if you want
 First, run the development server:
 
 ```bash

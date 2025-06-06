@@ -40,3 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 /public/uploads
+/models/mobilenetv2-10.onnx
+/models/yolov5l.onnx
+/models/yolov5s.onnx
