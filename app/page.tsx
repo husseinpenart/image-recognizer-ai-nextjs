@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 
 interface Detection {
@@ -149,10 +150,11 @@ export default function Home() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
+      <Link href={"/Model"} className="decoration-1 text-blue-500">my Trained model Link</Link>
       <h1 className="text-2xl font-bold mb-6 text-center">
         تشخیص اشیا در تصویر
       </h1>
-
+    
       <div className="mb-6">
         <input
           type="file"
